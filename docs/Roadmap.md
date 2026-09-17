@@ -142,12 +142,18 @@ Route handlers are invoked directly (real `Request`/`NextResponse` objects, real
 
 ---
 
-## Phase 8 — Seed Script
+## Phase 8 — Seed Script ✅ Done
 
 **Goal:** the deployed link must be explorable immediately, without calling the create-loan endpoint first.
 
-- [ ] `prisma/seed.ts` — 1–2 demo loans in different states (on-track, overdue, partially paid), clearly fake data
-- [ ] Runs against both local and hosted DB via the same script
+- [x] `prisma/seed.ts` — 3 demo loans in different states, clearly synthetic data:
+  - "mixed": two instalments paid on time, a third half-paid and now overdue, a fourth not yet due (PAID + PARTIALLY_PAID/overdue + PENDING all in one loan)
+  - "fresh": just disbursed, zero payments — a clean on-track example
+  - "overpaid": a single payment at 1.5x the first instalment's due amount, cascading into the second — demonstrates the overpayment design decision live
+- [x] Built on the app's own `generateSchedule`/`allocate`/repository functions (not raw SQL), so seed data is guaranteed consistent with what the app itself produces
+- [x] Runs via `npm run db:seed` (also wired as `prisma.seed` so `npx prisma db seed` works) — same script for local and hosted DB, whichever `DATABASE_URL` is active
+- [x] Ran it against the real Supabase DB and verified the numbers directly: overdue amount, next due date/amount, and outstanding principal all came out exactly as designed
+- [x] Documented as a **manual, one-time** step, deliberately not wired into the Vercel build — the script isn't idempotent (re-running creates duplicate loans), so it must not run on every deploy
 
 **Traces to:** PRD §11, §14; NFR "safe demo data"
 
