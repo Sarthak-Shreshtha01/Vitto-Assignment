@@ -92,16 +92,18 @@ Work through phases sequentially and check in after each one before moving to th
 
 ---
 
-## Phase 5 — API Routes + Auth
+## Phase 5 — API Routes + Auth ⏳ Mostly done — needs a real Firebase project
 
 **Goal:** the four endpoints, all behind server-verified Firebase auth, all using the one error shape.
 
-- [ ] `lib/auth/verifyToken.ts` — `requireAuth()` using Firebase Admin `verifyIdToken`
-- [ ] `POST /api/loans` — create loan + schedule
-- [ ] `GET /api/loans/:id` — schedule + derived position
-- [ ] `POST /api/loans/:id/payments` — record payment, handle duplicate replay
-- [ ] `GET /api/loans` — list (extension, backs the UI's loan picker)
-- [ ] Firebase project created; client config + admin credentials in `.env`
+- [x] `lib/auth/verifyToken.ts` — `requireAuth()` using Firebase Admin `verifyIdToken`
+- [x] `POST /api/loans` — create loan + schedule
+- [x] `GET /api/loans/:id` — schedule + derived position
+- [x] `POST /api/loans/:id/payments` — record payment, handle duplicate replay (pre-check + DB-level race safety net)
+- [x] `GET /api/loans` — list (extension, backs the UI's loan picker)
+- [x] Added `lib/serializers.ts` (shared rupee/date response mapping) and `lib/dates.ts` (`todayInIst()`, per SRS §2.4's "server clock, IST" assumption)
+- [x] Verified the 401 short-circuit manually (`npm run dev` + curl): missing token is rejected before validation or DB access, on both a create and a get-by-id request
+- [ ] **Firebase project not created yet** — `.env` Firebase vars are still empty, so the actual `verifyIdToken` path (valid token → 200) hasn't been exercised, only the "no token → 401" path. Needed before Phase 6's auth integration test and before the UI (Phase 7) can sign in.
 
 **Traces to:** PRD FR-1–FR-4, SRS §3.1–§3.4, §5.1, Architecture §4.1–§4.2
 
