@@ -1,0 +1,79 @@
+// Loan Repayment Service — data model
+// Traces to docs/SRS.md §4.2 (Entities) and docs/Architecture.md §6 (ERD).
+// Money is always stored as integer paise (BigInt columns) — never float/double.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum InstalmentStatus {
+  PENDING
+  PARTIALLY_PAID
+  PAID
+}
+
+model Loan {
+  id                 String   @id @default(cuid())
+  principalPaise     BigInt   @map("principal_paise")
+  annualInterestRate Decimal  @map("annual_interest_rate") @db.Decimal(6, 3)
+  tenureMonths       Int      @map("tenure_months")
+  disbursementDate   DateTime @map("disbursement_date") @db.Date
+  emiAmountPaise     BigInt   @map("emi_amount_paise")
+  createdAt          DateTime @default(now()) @map("created_at")
+
+  instalments Instalment[]
+  payments    Payment[]
+
+  @@map("loans")
+}
+
+model Instalment {
+  id                       String   @id @default(cuid())
+  loanId                   String   @map("loan_id")
+  sequenceNumber           Int      @map("sequence_number")
+  dueDate                  DateTime @map("due_date") @db.Date
+  principalComponentPaise  BigInt   @map("principal_component_paise")
+  interestComponentPaise   BigInt   @map("interest_component_paise")
+  totalDuePaise            BigInt   @map("total_due_paise")
+  amountPaidPaise          BigInt   @default(0) @map("amount_paid_paise")
+
+  loan        Loan                @relation(fields: [loanId], references: [id], onDelete: Cascade)
+  allocations PaymentAllocation[]
+
+  @@unique([loanId, sequenceNumber])
+  @@map("instalments")
+}
+
+model Payment {
+  id            String   @id @default(cuid())
+  loanId        String   @map("loan_id")
+  amountPaise   BigInt   @map("amount_paise")
+  paymentDate   DateTime @map("payment_date") @db.Date
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  loan        Loan                @relation(fields: [loanId], references: [id], onDelete: Cascade)
+  allocations PaymentAllocation[]
+
+  // Backs duplicate-submission detection — SRS §7.4. Holds even under
+  // concurrent/racing requests because it's a DB-level guarantee, not
+  // just an application-level check.
+  @@unique([loanId, amountPaise, paymentDate])
+  @@map("payments")
+}
+
+model PaymentAllocation {
+  id                 String @id @default(cuid())
+  paymentId          String @map("payment_id")
+  instalmentId       String @map("instalment_id")
+  amountAppliedPaise BigInt @map("amount_applied_paise")
+
+  payment    Payment    @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  instalment Instalment @relation(fields: [instalmentId], references: [id], onDelete: Cascade)
+
+  @@map("payment_allocations")
+}
