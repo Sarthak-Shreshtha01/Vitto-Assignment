@@ -1,69 +1,73 @@
-import Image from "next/image";
-import styles from "./page.module.css";
+"use client";
+
+import { useCallback, useState } from "react";
+import { AuthGate } from "@/app/components/AuthGate";
+import { LoanPicker } from "@/app/components/LoanPicker";
+import { ScheduleTable } from "@/app/components/ScheduleTable";
+import { PositionCard } from "@/app/components/PositionCard";
+import { PaymentForm } from "@/app/components/PaymentForm";
+import { authedFetch } from "@/lib/apiClient";
+import type { LoanDetail, PaymentResponse } from "@/app/apiTypes";
 
 export default function Home() {
+  const [loanId, setLoanId] = useState<string | null>(null);
+  const [loan, setLoan] = useState<LoanDetail | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSelectLoan = useCallback((id: string) => {
+    setLoanId(id);
+    setLoading(true);
+    setError(null);
+    authedFetch<LoanDetail>(`/api/loans/${id}`)
+      .then(setLoan)
+      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load loan"))
+      .finally(() => setLoading(false));
+  }, []);
+
+  // Applies the payment response's own deltas locally, so the schedule and
+  // position update immediately without a manual refresh (FR-5/SRS §3.5).
+  function handlePaymentRecorded(response: PaymentResponse) {
+    setLoan((current) => {
+      if (!current) return current;
+      const appliedBySequence = new Map(
+        response.appliedTo.map((a) => [a.sequenceNumber, a.amountApplied]),
+      );
+
+      return {
+        ...current,
+        position: response.position,
+        schedule: current.schedule.map((row) => {
+          const applied = appliedBySequence.get(row.sequenceNumber);
+          if (!applied) return row;
+          const amountPaid = row.amountPaid + applied;
+          return {
+            ...row,
+            amountPaid,
+            status: amountPaid >= row.totalDue ? "PAID" : amountPaid > 0 ? "PARTIALLY_PAID" : "PENDING",
+          };
+        }),
+      };
+    });
+  }
+
   return (
-    <div className={styles.page}>
-      <main className={styles.main}>
-        <Image
-          className={styles.logo}
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className={styles.intro}>
-          <h1>
-            To get started, edit the{" "}
-            <code className={styles.code}>page.tsx</code> file.
-          </h1>
-          <p>
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className={styles.ctas}>
-          <a
-            className={styles.primary}
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className={styles.logo}
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className={styles.secondary}
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+    <AuthGate>
+      {() => (
+        <main className="page">
+          <h1>Loan Repayment Service</h1>
+          <LoanPicker selectedLoanId={loanId} onSelect={handleSelectLoan} />
+          {loading && <p>Loading…</p>}
+          {error && <p className="error-text">{error}</p>}
+          {loan && (
+            <>
+              <PositionCard position={loan.position} />
+              <ScheduleTable schedule={loan.schedule} />
+              <PaymentForm loanId={loan.id} onRecorded={handlePaymentRecorded} />
+            </>
+          )}
+        </main>
+      )}
+    </AuthGate>
   );
 }

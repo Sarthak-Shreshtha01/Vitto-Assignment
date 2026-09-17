@@ -122,20 +122,21 @@ Route handlers are invoked directly (real `Request`/`NextResponse` objects, real
 
 **Traces to:** PRD FR-6, SRS §3.6, §10
 
-**Traces to:** PRD FR-6, SRS §3.6, §10; total suite should land at ~8–12 tests across Phases 3 + 6
-
 ---
 
-## Phase 7 — UI (single page)
+## Phase 7 — UI (single page) ⏳ Built, not yet visually verified
 
 **Goal:** the minimum page that lets a reviewer sign in, see a schedule, and record a payment without a manual refresh.
 
-- [ ] `AuthGate` — redirect unauthenticated visitors to sign-in; sign-out action
-- [ ] Firebase client SDK sign-in (email/password or Google)
-- [ ] `LoanPicker` — backed by `GET /api/loans`
-- [ ] `ScheduleTable` — due date, principal, interest, total due, amount paid, status
-- [ ] `PositionCard` — outstanding principal, next due, overdue amount (visually distinct if > 0)
-- [ ] `PaymentForm` — amount + date, updates displayed state from the response, no reload
+- [x] `AuthGate` — redirect unauthenticated visitors to sign-in; sign-out action
+- [x] Firebase client SDK sign-in (email/password and Google)
+- [x] `LoanPicker` — backed by `GET /api/loans`
+- [x] `ScheduleTable` — due date, principal, interest, total due, amount paid, status
+- [x] `PositionCard` — outstanding principal, next due, overdue amount (visually distinct if > 0)
+- [x] `PaymentForm` — amount + date, updates displayed state from the response (merges `appliedTo` into local state directly), no reload
+- [x] Made Firebase client init lazy (`lib/firebase/client.ts`'s `getFirebaseAuth()`) — `getAuth()` validates the API key synchronously and was crashing `next build`'s prerender pass with empty credentials
+- [x] Confirmed `npm run build` and the page's SSR shell (`curl localhost:3000/`) both work cleanly with no Firebase credentials set
+- [ ] **Not yet clicked through in an actual browser** — no browser tool available in this environment. Once real Firebase credentials are added, the sign-in form, loan picker, and payment flow all still need a real click-through pass before calling this phase done.
 
 **Traces to:** PRD FR-5, SRS §3.5, Architecture §4.5
 
