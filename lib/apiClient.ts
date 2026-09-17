@@ -1,4 +1,4 @@
-import { signOut } from "firebase/auth";
+import { signOut, type User } from "firebase/auth";
 import { getFirebaseAuth } from "@/lib/firebase/client";
 
 // Thrown for any non-2xx API response. Carries the HTTP status and the
@@ -16,12 +16,49 @@ export class ApiClientError extends Error {
   }
 }
 
-async function getIdToken(forceRefresh: boolean): Promise<string> {
+// This module owns the access token's entire lifecycle - nothing else in
+// the app touches getIdToken() directly. A Firebase ID token is a JWT valid
+// for ~1 hour; instead of trusting the SDK's internal refresh timing
+// silently, we decode its own `exp` claim and track expiry ourselves, so
+// the decision to refresh is explicit and testable rather than implicit.
+let cachedToken: { value: string; expiresAtMs: number } | null = null;
+
+const REFRESH_SKEW_MS = 60_000; // refresh a minute early rather than cutting it exactly at expiry
+
+function decodeTokenExpiryMs(token: string): number {
+  const payload = token.split(".")[1];
+  const decoded = JSON.parse(atob(payload.replace(/-/g, "+").replace(/_/g, "/")));
+  return decoded.exp * 1000;
+}
+
+// Called on sign-out so a stale token can never be reused if a different
+// user signs in afterward.
+export function clearCachedToken(): void {
+  cachedToken = null;
+}
+
+async function fetchAndCacheToken(user: User, forceRefresh: boolean): Promise<string> {
+  const token = await user.getIdToken(forceRefresh);
+  cachedToken = { value: token, expiresAtMs: decodeTokenExpiryMs(token) };
+  return token;
+}
+
+// Returns a token known to be valid for at least REFRESH_SKEW_MS longer,
+// refreshing proactively (before any request fails) rather than only
+// reacting to a 401. `forceRefresh` bypasses the cache entirely - used by
+// the retry path below when a request still gets a 401 despite a
+// seemingly-valid cached token (e.g. the user's session was revoked).
+async function getValidIdToken(forceRefresh = false): Promise<string> {
   const user = getFirebaseAuth().currentUser;
   if (!user) {
     throw new ApiClientError(401, "UNAUTHENTICATED", "Not signed in");
   }
-  return user.getIdToken(forceRefresh);
+
+  if (!forceRefresh && cachedToken && cachedToken.expiresAtMs - Date.now() > REFRESH_SKEW_MS) {
+    return cachedToken.value;
+  }
+
+  return fetchAndCacheToken(user, forceRefresh);
 }
 
 async function parseErrorBody(response: Response): Promise<{ code?: string; message?: string }> {
@@ -33,24 +70,26 @@ async function parseErrorBody(response: Response): Promise<{ code?: string; mess
   }
 }
 
-// The single place every frontend API call goes through. Every route
-// requires auth, so this always attaches a Bearer token - and it's the one
-// place that knows what to do when that token stops being good enough:
+// The single place every frontend API call goes through - components never
+// call fetch() or touch a Firebase token directly. Handles:
 //
-// - 401 on the first attempt might just mean the cached token expired
-//   (Firebase tokens are short-lived) - force a refresh and retry once.
-// - 401 again after a fresh token means the session itself is invalid
-//   (revoked/deleted user) - sign out so AuthGate sends the user back to
-//   sign-in, rather than leaving them stuck retrying forever.
-// - 403 means authenticated but not permitted - surfaced distinctly since
-//   retrying or signing out wouldn't help (no role/permission model exists
-//   yet, but this keeps the client correct if one is ever added).
+// - Proactive refresh: a token about to expire is refreshed before the
+//   request is even sent (see getValidIdToken above).
+// - Reactive refresh: if a request still comes back 401 despite that (a
+//   clock skew, or the cache being wrong), force a fresh token and retry
+//   exactly once.
+// - A 401 that persists after a forced refresh means the session itself is
+//   invalid (revoked/deleted user) - sign out so AuthGate sends the user
+//   back to sign-in, rather than leaving the UI stuck retrying forever.
+// - A 403 is surfaced distinctly (no retry/sign-out - there's no
+//   permission model yet, but this keeps the client correct if one is
+//   ever added).
 export async function authedFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
   return request<T>(path, options, false);
 }
 
 async function request<T>(path: string, options: RequestInit, isRetry: boolean): Promise<T> {
-  const token = await getIdToken(isRetry);
+  const token = await getValidIdToken(isRetry);
 
   const response = await fetch(path, {
     ...options,
@@ -66,6 +105,7 @@ async function request<T>(path: string, options: RequestInit, isRetry: boolean):
   }
 
   if (response.status === 401) {
+    cachedToken = null;
     await signOut(getFirebaseAuth()).catch(() => {});
     const { code } = await parseErrorBody(response);
     throw new ApiClientError(401, code ?? "UNAUTHORIZED", "Your session has expired. Please sign in again.");

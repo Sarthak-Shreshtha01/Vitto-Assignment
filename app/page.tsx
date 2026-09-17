@@ -6,6 +6,7 @@ import { LoanPicker } from "@/app/components/LoanPicker";
 import { ScheduleTable } from "@/app/components/ScheduleTable";
 import { PositionCard } from "@/app/components/PositionCard";
 import { PaymentForm } from "@/app/components/PaymentForm";
+import { LoanDetailSkeleton } from "@/app/components/LoanDetailSkeleton";
 import { authedFetch } from "@/lib/apiClient";
 import type { LoanDetail, PaymentResponse } from "@/app/apiTypes";
 
@@ -54,16 +55,17 @@ export default function Home() {
   return (
     <AuthGate>
       {() => (
-        <main className="page">
-          <h1>Loan Repayment Service</h1>
+        <main className="main-content">
           <LoanPicker selectedLoanId={loanId} onSelect={handleSelectLoan} />
-          {loading && <p>Loading…</p>}
           {error && <p className="error-text">{error}</p>}
-          {loan && (
+          {loading && <LoanDetailSkeleton />}
+          {!loading && loan && (
             <>
               <PositionCard position={loan.position} />
-              <ScheduleTable schedule={loan.schedule} />
-              <PaymentForm loanId={loan.id} onRecorded={handlePaymentRecorded} />
+              <ScheduleTable
+                schedule={loan.schedule}
+                actions={<PaymentForm loanId={loan.id} onRecorded={handlePaymentRecorded} />}
+              />
             </>
           )}
         </main>

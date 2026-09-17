@@ -152,7 +152,8 @@ Also confirmed a fake (garbage) Bearer token degrades to 401 rather than a 500 (
 - [x] Made Firebase client init lazy (`lib/firebase/client.ts`'s `getFirebaseAuth()`) — `getAuth()` validates the API key synchronously and was crashing `next build`'s prerender pass with empty credentials
 - [x] Confirmed `npm run build` and the page's SSR shell (`curl localhost:3000/`) both work cleanly with no Firebase credentials set
 - [x] Firebase is now live and every API route the UI calls has been verified end-to-end with a real ID token (see Phase 5) - the UI's data layer isn't hitting anything unproven
-- [ ] **Still not clicked through in an actual browser** — no browser tool available in this environment. The React components (`AuthGate`'s `onAuthStateChanged` wiring, the sign-in form, clicking through the loan picker, submitting the payment form) haven't been visually exercised, only the API calls they'll make.
+- [x] Restyled the whole UI against Vitto's actual brand (docs/stitch.md): CSS custom properties for colors/type/radii in `app/globals.css`, Inter font, a shared `BrandMark`, branded header/sign-in card, KPI-card position summary, status-pill schedule table with a real (data-derived, not decorative) status filter, and a proper modal for recording a payment instead of an inline form
+- [ ] **Still not clicked through in an actual browser** — no browser tool available in this environment. Verified the SSR shell renders the correct markup/classes and doesn't crash (`curl` + grep), and that the backend calls the UI makes all work with a real token, but the actual rendered visual result (colors, layout, modal behavior) hasn't been seen.
 
 **Traces to:** PRD FR-5, SRS §3.5, Architecture §4.5
 
@@ -172,6 +173,19 @@ Also confirmed a fake (garbage) Bearer token degrades to 401 rather than a 500 (
 - [x] Documented as a **manual, one-time** step, deliberately not wired into the Vercel build — the script isn't idempotent (re-running creates duplicate loans), so it must not run on every deploy
 
 **Traces to:** PRD §11, §14; NFR "safe demo data"
+
+---
+
+## Architecture refactor (post-Phase-8, user-requested)
+
+Requested explicitly, on top of the phase plan: a real middleware layer, a controller layer between routes and services, an explicit frontend token lifecycle, and a branded UI. All verified end-to-end, not just built.
+
+- **`proxy.ts`** — a real Next.js Proxy (Next 16 renamed `middleware.ts`, and it now defaults to the Node.js runtime, which is what makes running the Firebase Admin SDK there possible). Verifies the Firebase token once for every `/api/*` request and attaches it as trusted headers.
+- **`requireAuth()`** now trusts those headers when present, and independently re-verifies otherwise (Next's own docs warn against relying on Proxy alone, and our integration tests invoke route handlers directly, bypassing Proxy entirely) - so auth is centralized without becoming a single point that testing/direct invocation could silently skip.
+- **`lib/controllers/*.ts`** — `loanController.ts` (createLoan, getLoan, listLoans) and `paymentController.ts` (recordPayment) now own all orchestration (auth, validation, service calls, repository calls, response shaping). Routes shrank to one-liners that call `lib/http.ts`'s `handleRoute()`.
+- **`lib/apiClient.ts`** rewritten to own the frontend's access token lifecycle explicitly: decodes the token's own `exp` claim and caches it, refreshes proactively before it expires, retries once reactively on an unexpected 401, and only then signs out. 403 handled distinctly.
+- **UI rebuilt against `docs/stitch.md`** (Vitto's brand system, extracted from vitto.money) — see Phase 7's checklist for specifics.
+- Verified: full test suite still green (18/18) after the refactor; rebuilt, relinted; live end-to-end check against the running dev server with a real Firebase token covering GET list, GET by id, POST create, POST payment (including duplicate detection), and malformed-JSON handling — all through the new proxy → controller path, not the old direct-in-route path; cleaned DB back to the 3 seed loans afterward.
 
 ---
 

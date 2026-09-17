@@ -1,13 +1,10 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import {
-  createUserWithEmailAndPassword,
-  GoogleAuthProvider,
-  signInWithEmailAndPassword,
-  signInWithPopup,
-} from "firebase/auth";
+import { createUserWithEmailAndPassword, signInWithEmailAndPassword } from "firebase/auth";
 import { getFirebaseAuth } from "@/lib/firebase/client";
+import { BrandMark } from "@/app/components/BrandMark";
+import { Spinner } from "@/app/components/Spinner";
 
 export function SignIn() {
   const [email, setEmail] = useState("");
@@ -34,49 +31,54 @@ export function SignIn() {
     }
   }
 
-  async function handleGoogleSignIn() {
-    setError(null);
-    try {
-      await signInWithPopup(getFirebaseAuth(), new GoogleAuthProvider());
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Sign-in failed");
-    }
-  }
-
   return (
-    <div className="sign-in">
-      <h1>Sign in</h1>
-      <form onSubmit={handleSubmit}>
-        <input
-          type="email"
-          placeholder="Email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          required
-        />
-        <input
-          type="password"
-          placeholder="Password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          required
-          minLength={6}
-        />
-        <button type="submit" disabled={submitting}>
-          {mode === "signin" ? "Sign in" : "Create account"}
+    <div className="app-shell sign-in-page">
+      <div className="sign-in sign-in-card">
+        <div className="sign-in-header">
+          <BrandMark size={36} />
+          <div>
+            <h1>Loan Repayment Service</h1>
+            <p>Internal Ops Portal · Sign in to continue</p>
+          </div>
+        </div>
+
+        <form onSubmit={handleSubmit}>
+          <div className="field">
+            <label htmlFor="email">Email</label>
+            <input
+              id="email"
+              type="text"
+              placeholder="you@example.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="password">Password</label>
+            <input
+              id="password"
+              type="password"
+              placeholder="••••••••"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+          </div>
+          <button type="submit" className="btn btn-primary" disabled={submitting}>
+            {submitting && <Spinner />}
+            {mode === "signin" ? "Sign in" : "Create account"}
+          </button>
+        </form>
+
+        <button
+          type="button"
+          className="link-button"
+          onClick={() => setMode(mode === "signin" ? "signup" : "signin")}
+        >
+          {mode === "signin" ? "Need an account? Sign up" : "Have an account? Sign in"}
         </button>
-      </form>
-      <button
-        type="button"
-        className="link-button"
-        onClick={() => setMode(mode === "signin" ? "signup" : "signin")}
-      >
-        {mode === "signin" ? "Need an account? Sign up" : "Have an account? Sign in"}
-      </button>
-      <button type="button" onClick={handleGoogleSignIn}>
-        Sign in with Google
-      </button>
-      {error && <p className="error-text">{error}</p>}
+
+        {error && <p className="error-text">{error}</p>}
+      </div>
     </div>
   );
 }

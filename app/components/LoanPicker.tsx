@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { authedFetch } from "@/lib/apiClient";
 import type { LoanSummary } from "@/app/apiTypes";
+import { Skeleton } from "@/app/components/Skeleton";
 
 interface LoanPickerProps {
   selectedLoanId: string | null;
@@ -27,20 +28,21 @@ export function LoanPicker({ selectedLoanId, onSelect }: LoanPickerProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  if (error) return <p className="error-text">{error}</p>;
-  if (!loans) return <p>Loading loans…</p>;
-  if (loans.length === 0) return <p>No loans yet.</p>;
-
   return (
-    <label className="loan-picker">
-      Loan:{" "}
-      <select value={selectedLoanId ?? ""} onChange={(e) => onSelect(e.target.value)}>
-        {loans.map((loan) => (
-          <option key={loan.id} value={loan.id}>
-            {loan.id} — ₹{loan.principal.toLocaleString("en-IN")} @ {loan.annualInterestRate}%
-          </option>
-        ))}
-      </select>
-    </label>
+    <div className="card loan-picker">
+      <span className="loan-picker-label">Active loan</span>
+      {error && <p className="error-text">{error}</p>}
+      {!error && !loans && <Skeleton className="loan-picker-skeleton" />}
+      {!error && loans && loans.length === 0 && <p>No loans yet.</p>}
+      {!error && loans && loans.length > 0 && (
+        <select value={selectedLoanId ?? ""} onChange={(e) => onSelect(e.target.value)}>
+          {loans.map((loan) => (
+            <option key={loan.id} value={loan.id}>
+              {loan.id} · ₹{loan.principal.toLocaleString("en-IN")} @ {loan.annualInterestRate}%
+            </option>
+          ))}
+        </select>
+      )}
+    </div>
   );
 }

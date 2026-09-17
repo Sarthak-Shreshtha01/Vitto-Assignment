@@ -101,12 +101,13 @@ Wraps all DB reads/writes. Two responsibilities beyond plain CRUD:
 - **Duplicate detection** — the unique constraint on `payments(loan_id, amount_paise, payment_date)` (SRS §4.2) is enforced here; the repository catches the constraint violation and returns "this is a replay" rather than letting a raw DB error bubble up.
 
 ### 4.5 Frontend
-One page, a handful of components, and a single API client:
-- `lib/apiClient.ts`'s `authedFetch()` — every component call goes through this, never `fetch()` directly. Attaches the current Firebase ID token; on a `401` it force-refreshes the token and retries once (covers a merely-stale cached token), and if still `401` after that, signs the user out so `AuthGate` sends them back to sign-in rather than leaving the UI stuck retrying. A `403` is surfaced distinctly (no retry/sign-out — there's no permission model yet, but this keeps the client correct if one is added).
+One page, a handful of components, and a single API client. Visual design follows `docs/stitch.md` (Vitto's brand palette/typography extracted from vitto.money, adapted for a data-dense internal tool — restrained accent color usage, neutral surfaces for the schedule/KPI data, brand pink reserved for primary actions and overdue alerts) via CSS custom properties in `app/globals.css` — no component library, per the brief.
+
+- `lib/apiClient.ts`'s `authedFetch()` — every component call goes through this, never `fetch()` or a Firebase token directly. It owns the access token's entire lifecycle: decodes the token's own `exp` claim and caches it, proactively refreshing shortly before expiry rather than waiting for a request to fail. If a request still comes back `401` despite that (clock skew, a revoked session), it force-refreshes and retries exactly once; a `401` that persists after that means the session itself is invalid, so it signs the user out and clears the cache so `AuthGate` sends them back to sign-in. A `403` is surfaced distinctly (no retry/sign-out — there's no permission model yet, but this keeps the client correct if one is added).
 - `LoanPicker` — lists loans via `GET /api/loans`, lets the user select one (SRS §3.5).
-- `ScheduleTable` — renders the schedule with per-row status.
-- `PositionCard` — outstanding principal, next due, overdue amount (visually distinct if `> 0`).
-- `PaymentForm` — amount + date, calls `POST /api/loans/:id/payments`, updates local state from the response (no reload).
+- `ScheduleTable` — renders the schedule with per-row status pills, plus a real client-derived status filter (All/Overdue/Partially Paid/Pending/Paid, with live counts) — "overdue" is computed the same way as the backend (`today > due date && not fully paid`) purely for display, never the source of truth (that stays `position.overdueAmount`).
+- `PositionCard` — outstanding principal, next due, overdue amount, rendered as three KPI cards (visually distinct pink ring/text if overdue `> 0`).
+- `PaymentForm` — a pill button that opens a modal (amount + date), calls `POST /api/loans/:id/payments`, updates local state from the response (no reload).
 - `AuthGate` — wraps the page; redirects to sign-in if no authenticated Firebase user, shows sign-out otherwise.
 
 ## 5. Sequence Diagrams
@@ -253,9 +254,10 @@ loan-repayment-service/
 │       ├── LoanPicker.tsx
 │       ├── ScheduleTable.tsx
 │       ├── PositionCard.tsx
-│       ├── PaymentForm.tsx
+│       ├── PaymentForm.tsx        # trigger button + modal
 │       ├── SignIn.tsx
-│       └── AuthGate.tsx
+│       ├── AuthGate.tsx
+│       └── BrandMark.tsx          # shared logo mark (docs/stitch.md)
 ├── lib/
 │   ├── apiClient.ts                  # authedFetch() - the frontend's one API entry point
 │   ├── auth/
@@ -314,7 +316,7 @@ flowchart LR
 Key points:
 - The **Admin SDK verification happens on the server** — the browser's possession of a token is never treated as sufficient on its own. This is what satisfies "tokens must be verified server-side, not only in the client" (brief §01).
 - It happens **twice, cheaply**: once in `proxy.ts` for every real HTTP request (fast rejection before a route or the database is touched), and once more via `requireAuth()`'s fallback for anything that reaches a controller without having gone through Proxy (Next's own docs warn against trusting Proxy alone). In the normal case `requireAuth()` just reads Proxy's already-verified header instead of calling the Admin SDK a second time.
-- On a `401`, `lib/apiClient.ts` retries once with a force-refreshed token (handles a merely-expired cached token) before signing the user out.
+- `lib/apiClient.ts` proactively refreshes the token before it expires (tracked from the token's own `exp` claim); a `401` that still slips through gets one retry with a forced refresh before signing the user out.
 
 ## 9. Error Handling Architecture
 
@@ -364,7 +366,8 @@ flowchart TB
 | Vercel + Neon/Supabase + same Firebase project across environments | Same connection-string shape and schema-application path locally and in production — no "works on my machine" surprises |
 | Controller layer between routes and services, returning plain data (`RouteResult`) instead of `NextResponse` | Routes become one-liners; controllers are unit-testable without Next.js; dependency direction stays inward (routes → controllers → services/repository) |
 | Proxy (`proxy.ts`) verifies auth first, `requireAuth()` re-verifies if its header is missing | Fast, centralized rejection for real traffic, without silently trusting a layer that a routing change (or a direct-invocation test) could bypass |
-| Frontend API client force-refreshes and retries once on 401 before signing out | Distinguishes "token just expired" (recoverable) from "session truly invalid" (needs sign-in), instead of one-size-fits-all error handling |
+| Frontend API client owns the token lifecycle end-to-end (proactive refresh from the JWT's own `exp`, one reactive retry on 401, sign-out only if that still fails) | Distinguishes "token about to/just expired" (recoverable, invisible to the user) from "session truly invalid" (needs sign-in), instead of one-size-fits-all error handling |
+| UI visual design driven by CSS custom properties matching Vitto's brand (docs/stitch.md), not a component library | Satisfies the brief's "no component library required" while still giving a coherent, on-brand look — a handful of tokens plus plain CSS classes |
 
 ## 13. Extensibility Notes (not built, but the design accommodates them)
 
