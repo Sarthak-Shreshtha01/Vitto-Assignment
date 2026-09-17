@@ -74,12 +74,21 @@ flowchart TB
 ## 4. Component Breakdown
 
 ### 4.1 Route Handlers (`app/api/**/route.ts`)
-Thin. Responsibilities: parse request, call auth middleware, call the relevant service, map service result/errors → HTTP response using the standard error shape (SRS §8). No business logic lives here.
+Deliberately trivial — each exported `GET`/`POST` does nothing but extract dynamic params (if any) and delegate to `lib/http.ts`'s `handleRoute()` with the matching controller call. No parsing, validation, auth, or business logic lives here; a route file is the only place that imports `next/server`'s response types indirectly (via `handleRoute`), which is what keeps the controller layer testable without Next.js in the loop.
 
-### 4.2 Auth Middleware / Guard
-A small helper (`requireAuth(request)`) called at the top of every route handler. Extracts the `Authorization: Bearer <token>` header, verifies it via Firebase Admin SDK's `verifyIdToken`, and either returns the decoded token (handler proceeds) or short-circuits with `401 UNAUTHORIZED`. Centralizing this in one helper — rather than repeating logic per route — is what guarantees all three endpoints actually enforce it, and is the one thing worth double-checking manually before submission.
+### 4.2 Auth: Proxy + `requireAuth()`
+Two layers, not one:
+- **`proxy.ts`** (project root) — a real Next.js Proxy (the file convention Next 16 renamed from `middleware.ts`; it now defaults to the **Node.js runtime**, which is what makes running the Firebase Admin SDK here possible at all). Matches `/api/:path*` and verifies the `Authorization: Bearer <token>` header via `verifyBearerToken()` before a request reaches any route. On success it attaches the verified `uid`/`email` as internal request headers; on failure it returns `401` immediately, before any route/controller code or the database is touched.
+- **`requireAuth()`** (`lib/auth/verifyToken.ts`) — called once per controller (see 4.3.1). Trusts Proxy's headers when present (the normal path for real traffic — no second Admin SDK round-trip), otherwise independently verifies the token itself. That fallback isn't redundant: Next's own docs warn against relying on Proxy alone (a routing change could silently skip it), and anything that invokes a route handler directly — our integration tests, for instance — bypasses `proxy.ts` entirely and needs `requireAuth()` to still enforce auth on its own.
 
-### 4.3 Service Layer
+Centralizing verification this way — one Proxy file plus one shared guard function, rather than hand-rolled checks per route — is what guarantees every endpoint actually enforces auth, and is the one thing worth double-checking manually before submission.
+
+### 4.3 Controller Layer (`lib/controllers/*.ts`)
+Sits between routes and services. Each function corresponds to one endpoint (`createLoan`, `getLoan`, `listLoans`, `recordPayment`) and owns the full use case: call `requireAuth()`, parse/validate the request body, call the service layer for business logic, call the repository for persistence, shape the response. Returns a plain `{ status, body }` (`RouteResult`) rather than a `NextResponse` — controllers don't know Next.js exists, which is what makes them unit-testable in isolation and keeps the dependency direction pointing inward (routes depend on controllers, controllers depend on services/repository — never the reverse).
+
+This is the layer the brief's "examine specific functions and ask how your allocation logic behaves" scrutiny actually lands on for anything HTTP-shaped (duplicate handling, validation ordering, response assembly) — the service layer (4.3.1) is where it lands for the pure money math.
+
+#### 4.3.1 Service Layer (`lib/services/*.ts`)
 - **`ScheduleService`** — pure function `generateSchedule(principal, annualRate, tenureMonths, disbursementDate) → Instalment[]`. Implements the EMI formula and rounding rules from SRS §3.1/§7.5. No DB access — takes primitives, returns plain objects. This is what the unit tests target directly.
 - **`AllocationService`** — pure function `allocate(instalments, payment) → { updatedInstalments, appliedTo[] }` implementing the oldest-first cascade from SRS §7.1–7.2. Also pure — no DB access — so allocation edge cases (underpayment, overpayment, cascade) are unit-tested without spinning up a database.
 - **`PositionService`** — pure function `derivePosition(instalments, today) → { outstandingPrincipal, nextDueDate, nextDueAmount, overdueAmount }` implementing SRS §7.3. Called on every `GET /api/loans/:id` — never stored, always recomputed, so it can never drift out of sync (SRS §4.2).
@@ -92,7 +101,8 @@ Wraps all DB reads/writes. Two responsibilities beyond plain CRUD:
 - **Duplicate detection** — the unique constraint on `payments(loan_id, amount_paise, payment_date)` (SRS §4.2) is enforced here; the repository catches the constraint violation and returns "this is a replay" rather than letting a raw DB error bubble up.
 
 ### 4.5 Frontend
-One page, a handful of components:
+One page, a handful of components, and a single API client:
+- `lib/apiClient.ts`'s `authedFetch()` — every component call goes through this, never `fetch()` directly. Attaches the current Firebase ID token; on a `401` it force-refreshes the token and retries once (covers a merely-stale cached token), and if still `401` after that, signs the user out so `AuthGate` sends them back to sign-in rather than leaving the UI stuck retrying. A `403` is surfaced distinctly (no retry/sign-out — there's no permission model yet, but this keeps the client correct if one is added).
 - `LoanPicker` — lists loans via `GET /api/loans`, lets the user select one (SRS §3.5).
 - `ScheduleTable` — renders the schedule with per-row status.
 - `PositionCard` — outstanding principal, next due, overdue amount (visually distinct if `> 0`).
@@ -228,39 +238,55 @@ Full column-level constraints are specified in SRS §4.2 — this diagram is the
 
 ```
 loan-repayment-service/
+├── proxy.ts                           # Next.js Proxy - verifies auth for /api/:path* up front
 ├── app/
 │   ├── api/
 │   │   └── loans/
-│   │       ├── route.ts              # POST /api/loans, GET /api/loans
+│   │       ├── route.ts              # POST /api/loans, GET /api/loans (delegates to controllers)
 │   │       └── [id]/
 │   │           ├── route.ts          # GET /api/loans/:id
 │   │           └── payments/
 │   │               └── route.ts      # POST /api/loans/:id/payments
 │   ├── page.tsx                      # the single UI page
+│   ├── apiTypes.ts                   # frontend types mirroring the API response shapes
 │   └── components/
 │       ├── LoanPicker.tsx
 │       ├── ScheduleTable.tsx
 │       ├── PositionCard.tsx
 │       ├── PaymentForm.tsx
+│       ├── SignIn.tsx
 │       └── AuthGate.tsx
 ├── lib/
+│   ├── apiClient.ts                  # authedFetch() - the frontend's one API entry point
 │   ├── auth/
-│   │   └── verifyToken.ts            # Firebase Admin SDK wrapper + requireAuth()
+│   │   └── verifyToken.ts            # Firebase Admin SDK wrapper, verifyBearerToken() + requireAuth()
+│   ├── controllers/
+│   │   ├── loanController.ts         # createLoan, getLoan, listLoans
+│   │   ├── paymentController.ts      # recordPayment
+│   │   └── types.ts                  # RouteResult
 │   ├── services/
 │   │   ├── scheduleService.ts
 │   │   ├── allocationService.ts
 │   │   └── positionService.ts
 │   ├── repository/
 │   │   └── loanRepository.ts         # all DB access, transactions
+│   ├── firebase/
+│   │   └── client.ts                 # lazy Firebase client SDK init
+│   ├── http.ts                       # handleRoute() - controller result -> NextResponse
+│   ├── validation.ts                 # input validation + parseJsonBody()
 │   ├── money.ts                      # rupee↔paise conversion helpers
+│   ├── dates.ts                      # todayInIst()
 │   └── errors.ts                     # standard error shape/codes (SRS §8)
-├── prisma/                           # or /db/migrations if using plain SQL
+├── prisma/
 │   ├── schema.prisma
+│   ├── migrations/
 │   └── seed.ts                       # demo loans for local + deployed DB
 ├── tests/
 │   ├── unit/
 │   │   ├── scheduleService.test.ts
-│   │   └── allocationService.test.ts
+│   │   ├── allocationService.test.ts
+│   │   ├── positionService.test.ts
+│   │   └── validation.test.ts
 │   └── integration/
 │       ├── createLoan.test.ts
 │       ├── getLoan.test.ts
@@ -275,16 +301,20 @@ loan-repayment-service/
 ```mermaid
 flowchart LR
     U["User"] -->|"email/password or Google"| FBClient["Firebase Client SDK\n(browser)"]
-    FBClient -->|"ID token"| UI["React page"]
-    UI -->|"Authorization: Bearer <token>"| Route["Route handler"]
-    Route --> Guard["requireAuth()"]
-    Guard -->|"verifyIdToken"| FBAdmin["Firebase Admin SDK\n(server)"]
-    FBAdmin -->|"decoded token / error"| Guard
-    Guard -->|"401"| Route
-    Guard -->|"proceed"| Route
+    FBClient -->|"ID token"| UI["React page (via apiClient)"]
+    UI -->|"Authorization: Bearer <token>"| Proxy["proxy.ts\n(Node.js runtime)"]
+    Proxy -->|"verifyIdToken"| FBAdmin["Firebase Admin SDK\n(server)"]
+    FBAdmin -->|"decoded token / error"| Proxy
+    Proxy -->|"401 (short-circuit)"| UI
+    Proxy -->|"sets x-verified-uid header, proceed"| Controller["Controller\nrequireAuth()"]
+    Controller -->|"trusted header present -> use it"| Handler["Route logic"]
+    Controller -.->|"header absent (e.g. direct invocation in tests)\n-> verify token itself"| FBAdmin
 ```
 
-Key point: the **Admin SDK verification happens on the server**, inside the route handler's request lifecycle — the browser's possession of a token is never treated as sufficient on its own. This is what satisfies "tokens must be verified server-side, not only in the client" (brief §01).
+Key points:
+- The **Admin SDK verification happens on the server** — the browser's possession of a token is never treated as sufficient on its own. This is what satisfies "tokens must be verified server-side, not only in the client" (brief §01).
+- It happens **twice, cheaply**: once in `proxy.ts` for every real HTTP request (fast rejection before a route or the database is touched), and once more via `requireAuth()`'s fallback for anything that reaches a controller without having gone through Proxy (Next's own docs warn against trusting Proxy alone). In the normal case `requireAuth()` just reads Proxy's already-verified header instead of calling the Admin SDK a second time.
+- On a `401`, `lib/apiClient.ts` retries once with a force-refreshed token (handles a merely-expired cached token) before signing the user out.
 
 ## 9. Error Handling Architecture
 
@@ -332,6 +362,9 @@ flowchart TB
 | Duplicate detection backed by a DB unique constraint, not just app-side checking | Holds up even under concurrent/racing requests, not just sequential ones |
 | Transactions around multi-row writes (schedule creation, payment+allocation) | Prevents partial writes on failure |
 | Vercel + Neon/Supabase + same Firebase project across environments | Same connection-string shape and schema-application path locally and in production — no "works on my machine" surprises |
+| Controller layer between routes and services, returning plain data (`RouteResult`) instead of `NextResponse` | Routes become one-liners; controllers are unit-testable without Next.js; dependency direction stays inward (routes → controllers → services/repository) |
+| Proxy (`proxy.ts`) verifies auth first, `requireAuth()` re-verifies if its header is missing | Fast, centralized rejection for real traffic, without silently trusting a layer that a routing change (or a direct-invocation test) could bypass |
+| Frontend API client force-refreshes and retries once on 401 before signing out | Distinguishes "token just expired" (recoverable) from "session truly invalid" (needs sign-in), instead of one-size-fits-all error handling |
 
 ## 13. Extensibility Notes (not built, but the design accommodates them)
 
