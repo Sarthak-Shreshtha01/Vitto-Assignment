@@ -56,16 +56,19 @@ Work through phases sequentially and check in after each one before moving to th
 
 ---
 
-## Phase 3 — Unit Tests for Core Logic
+## Phase 3 — Unit Tests for Core Logic ✅ Done
 
 **Goal:** lock in correctness on the pure functions before anything touches a database — matches the brief's explicit priority order.
 
-- [ ] EMI formula matches the reference case (₹2,00,000 @ 18% / 24mo ≈ ₹9,986)
-- [ ] Final-instalment rounding drift absorption (`Σ principalComponent == principal` exactly)
-- [ ] Underpayment case (partial amount tracked against the right instalment)
-- [ ] Overpayment case (cascades to next instalment, doesn't reduce principal early)
-- [ ] Payment exceeding total outstanding (excess recorded, not applied)
-- [ ] Invalid input rejected before reaching allocation logic
+- [x] EMI formula matches the reference case (₹2,00,000 @ 18% / 24mo ≈ ₹9,986) — `tests/unit/scheduleService.test.ts`
+- [x] Final-instalment rounding drift absorption (`Σ principalComponent == principal` exactly)
+- [x] Underpayment case (partial amount tracked against the right instalment) — `tests/unit/allocationService.test.ts`
+- [x] Overpayment case (cascades to next instalment, doesn't reduce principal early)
+- [x] Payment exceeding total outstanding (excess recorded, not applied)
+- [x] Invalid input rejected before reaching allocation logic — added `lib/validation.ts` + `tests/unit/validation.test.ts` (wasn't built yet in Phase 2; needed to exist for this checklist item)
+- [x] Bonus: overdue/late-payment behavior and the outstanding-principal design decision — `tests/unit/positionService.test.ts`
+
+14 unit tests total across 4 files, all passing (`npm test`). This is above the "~8-12 total" guideline on its own — Phase 6 will add integration tests on top, so the full suite will land a bit over the suggested range. Each test maps to a distinct documented case (PRD §8 or SRS §7), not padding; noting this tradeoff explicitly for the README.
 
 **Traces to:** PRD §8 edge cases, SRS §3.6, §7; FR-6
 
