@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth/verifyToken";
-import { validateRecordPaymentInput } from "@/lib/validation";
+import { parseJsonBody, validateRecordPaymentInput } from "@/lib/validation";
 import { allocate, type AppliedAllocation } from "@/lib/services/allocationService";
 import { derivePosition } from "@/lib/services/positionService";
 import {
@@ -22,7 +22,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   try {
     await requireAuth(request);
     const { id: loanId } = await params;
-    const body = await request.json();
+    const body = await parseJsonBody(request);
     const { amountPaise, date } = validateRecordPaymentInput(body);
 
     // Confirms the loan exists (throws NOT_FOUND otherwise) and gives us

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { validateCreateLoanInput, validateRecordPaymentInput } from "@/lib/validation";
+import { parseJsonBody, validateCreateLoanInput, validateRecordPaymentInput } from "@/lib/validation";
 import { ApiError } from "@/lib/errors";
 
 const validLoanBody = {
@@ -59,6 +59,21 @@ describe("validateRecordPaymentInput", () => {
 
     for (const body of invalidBodies) {
       expect(() => validateRecordPaymentInput(body)).toThrow(ApiError);
+    }
+  });
+});
+
+describe("parseJsonBody", () => {
+  const malformedRequest = () =>
+    new Request("http://localhost/api/loans", { method: "POST", body: "{not valid json" });
+
+  it("rejects malformed JSON as a VALIDATION_ERROR instead of a raw parse failure", async () => {
+    await expect(parseJsonBody(malformedRequest())).rejects.toThrow(ApiError);
+
+    try {
+      await parseJsonBody(malformedRequest());
+    } catch (error) {
+      expect((error as ApiError).code).toBe("VALIDATION_ERROR");
     }
   });
 });

@@ -68,7 +68,7 @@ Work through phases sequentially and check in after each one before moving to th
 - [x] Invalid input rejected before reaching allocation logic — added `lib/validation.ts` + `tests/unit/validation.test.ts` (wasn't built yet in Phase 2; needed to exist for this checklist item)
 - [x] Bonus: overdue/late-payment behavior and the outstanding-principal design decision — `tests/unit/positionService.test.ts`
 
-14 unit tests total across 4 files, all passing (`npm test`). This is above the "~8-12 total" guideline on its own — Phase 6 will add integration tests on top, so the full suite will land a bit over the suggested range. Each test maps to a distinct documented case (PRD §8 or SRS §7), not padding; noting this tradeoff explicitly for the README.
+15 unit tests total across 4 files, all passing (`npm test`) — the 15th (malformed-JSON handling) was added during the Phase-6+ audit pass, see below. This is above the "~8-12 total" guideline on its own — Phase 6 will add integration tests on top, so the full suite will land a bit over the suggested range. Each test maps to a distinct documented case (PRD §8 or SRS §7), not padding; noting this tradeoff explicitly for the README.
 
 **Traces to:** PRD §8 edge cases, SRS §3.6, §7; FR-6
 
@@ -92,7 +92,7 @@ Work through phases sequentially and check in after each one before moving to th
 
 ---
 
-## Phase 5 — API Routes + Auth ⏳ Mostly done — needs a real Firebase project
+## Phase 5 — API Routes + Auth ✅ Done (fully verified with real Firebase)
 
 **Goal:** the four endpoints, all behind server-verified Firebase auth, all using the one error shape.
 
@@ -102,8 +102,10 @@ Work through phases sequentially and check in after each one before moving to th
 - [x] `POST /api/loans/:id/payments` — record payment, handle duplicate replay (pre-check + DB-level race safety net)
 - [x] `GET /api/loans` — list (extension, backs the UI's loan picker)
 - [x] Added `lib/serializers.ts` (shared rupee/date response mapping) and `lib/dates.ts` (`todayInIst()`, per SRS §2.4's "server clock, IST" assumption)
-- [x] Verified the 401 short-circuit manually (`npm run dev` + curl): missing token is rejected before validation or DB access, on both a create and a get-by-id request
-- [ ] **Firebase project not created yet** — `.env` Firebase vars are still empty, so the actual `verifyIdToken` path (valid token → 200) hasn't been exercised, only the "no token → 401" path. Needed before Phase 6's auth integration test and before the UI (Phase 7) can sign in.
+- [x] Firebase project set up (real client config + admin credentials in `.env`)
+- [x] Verified with a **real Firebase ID token** — signed up a test account via the Identity Toolkit REST API directly (no browser needed), confirmed `requireAuth()` accepts it, then exercised every route over real HTTP against the running dev server: `GET /api/loans` (listed all 3 seeded loans correctly), `GET /api/loans/:id` (schedule + position matched exactly, including the final-instalment rounding drift and the overdue flag), `POST /api/loans` (created a throwaway test loan), `POST /api/loans/:id/payments` (recorded a payment, then replayed the identical request and got `duplicate: true` back with the same payment id)
+- [x] Also confirmed a genuinely invalid token (malformed JWT, not just a missing header) still correctly returns 401
+- [x] Cleaned up the throwaway test loan afterward — DB back to exactly the 3 seeded loans
 
 **Traces to:** PRD FR-1–FR-4, SRS §3.1–§3.4, §5.1, Architecture §4.1–§4.2
 
@@ -118,13 +120,26 @@ Work through phases sequentially and check in after each one before moving to th
 - [x] Unauthenticated request → 401 without a valid token — `tests/integration/auth.test.ts`
 - [x] Test data isolation — each test cleans up what it creates (`afterAll` cascade-deletes); verified DB left at 0 rows after each run
 
-Route handlers are invoked directly (real `Request`/`NextResponse` objects, real Prisma against the real Supabase DB) rather than through a running HTTP server — still exercises the actual handler code end-to-end. Since Firebase isn't set up yet (deferred — see TODO), the success-path and failure-path tests mock only `requireAuth` itself; the auth test is the one that exercises the real, unmocked guard with no token at all. Full suite: 17 tests (14 unit + 3 integration), all passing via `npm test`.
+Route handlers are invoked directly (real `Request`/`NextResponse` objects, real Prisma against the real Supabase DB) rather than through a running HTTP server — still exercises the actual handler code end-to-end. Since Firebase isn't set up yet (deferred — see TODO), the success-path and failure-path tests mock only `requireAuth` itself; the auth test is the one that exercises the real, unmocked guard with no token at all. Full suite: 18 tests (15 unit + 3 integration), all passing via `npm test`.
 
 **Traces to:** PRD FR-6, SRS §3.6, §10
 
 ---
 
-## Phase 7 — UI (single page) ⏳ Built, not yet visually verified
+## Audit pass (after Phase 8)
+
+Did a full re-check before continuing further: git hygiene (working tree clean, nothing pushed that shouldn't be, no secrets anywhere in history), lint/typecheck/build/full test suite all green, DB row counts cross-checked against what the seed script should produce, and a line-by-line re-read of the payments route (the riskiest file) and the auth guard. Two things came out of it:
+
+- **Fixed:** malformed JSON in a request body was surfacing as a generic 500 instead of a 400 `VALIDATION_ERROR`, since `request.json()` wasn't wrapped anywhere. Added `parseJsonBody()` in `lib/validation.ts`, used by both `POST /api/loans` and `POST /api/loans/:id/payments`, with a test locking it in.
+- **Documented, not fixed:** the payments route reads the schedule, computes the allocation, then writes. Two genuinely concurrent *different* payments to the same loan (not duplicates - those are DB-guaranteed safe via the unique constraint) could both compute their allocation from the same pre-write snapshot. PRD §14 lists optimistic concurrency (a `version` column) as an optional differentiator for exactly this scenario, so it's deliberately left as a documented gap rather than implemented under deadline pressure - the `GET /api/loans/:id` endpoint is unaffected since it always re-derives position fresh from the DB, so this only risks the position embedded in a `POST /payments` response being briefly stale under real concurrency, never a persisted-data corruption.
+
+Also confirmed a fake (garbage) Bearer token degrades to 401 rather than a 500 (this was checked before Firebase was configured, when it mattered most, but re-confirmed after too).
+
+**Update right after this audit: Firebase got set up** (see Phase 5's checklist above) - the auth path is now verified with a real token end-to-end, not just mocked/missing-token cases.
+
+---
+
+## Phase 7 — UI (single page) ⏳ Built; API layer verified, browser click-through still pending
 
 **Goal:** the minimum page that lets a reviewer sign in, see a schedule, and record a payment without a manual refresh.
 
@@ -136,7 +151,8 @@ Route handlers are invoked directly (real `Request`/`NextResponse` objects, real
 - [x] `PaymentForm` — amount + date, updates displayed state from the response (merges `appliedTo` into local state directly), no reload
 - [x] Made Firebase client init lazy (`lib/firebase/client.ts`'s `getFirebaseAuth()`) — `getAuth()` validates the API key synchronously and was crashing `next build`'s prerender pass with empty credentials
 - [x] Confirmed `npm run build` and the page's SSR shell (`curl localhost:3000/`) both work cleanly with no Firebase credentials set
-- [ ] **Not yet clicked through in an actual browser** — no browser tool available in this environment. Once real Firebase credentials are added, the sign-in form, loan picker, and payment flow all still need a real click-through pass before calling this phase done.
+- [x] Firebase is now live and every API route the UI calls has been verified end-to-end with a real ID token (see Phase 5) - the UI's data layer isn't hitting anything unproven
+- [ ] **Still not clicked through in an actual browser** — no browser tool available in this environment. The React components (`AuthGate`'s `onAuthStateChanged` wiring, the sign-in form, clicking through the loan picker, submitting the payment form) haven't been visually exercised, only the API calls they'll make.
 
 **Traces to:** PRD FR-5, SRS §3.5, Architecture §4.5
 

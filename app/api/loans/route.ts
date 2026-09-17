@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth/verifyToken";
-import { validateCreateLoanInput } from "@/lib/validation";
+import { parseJsonBody, validateCreateLoanInput } from "@/lib/validation";
 import { generateSchedule } from "@/lib/services/scheduleService";
 import { createLoanWithSchedule, listLoans } from "@/lib/repository/loanRepository";
 import { toErrorResponse } from "@/lib/errors";
@@ -10,7 +10,7 @@ import { serializeInstalment, serializeLoanHeader } from "@/lib/serializers";
 export async function POST(request: Request) {
   try {
     await requireAuth(request);
-    const body = await request.json();
+    const body = await parseJsonBody(request);
     const input = validateCreateLoanInput(body);
 
     const { emiAmountPaise, instalments } = generateSchedule(

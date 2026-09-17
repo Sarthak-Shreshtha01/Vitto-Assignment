@@ -5,6 +5,17 @@ import { rupeesToPaise } from "@/lib/money";
 // request ever reaches schedule generation or allocation - callers (route
 // handlers) call these first and let the thrown ApiError propagate.
 
+// request.json() throws a plain SyntaxError on malformed JSON, which would
+// otherwise surface as a generic 500 - this maps it to the same
+// VALIDATION_ERROR shape as every other bad-input case.
+export async function parseJsonBody(request: Request): Promise<unknown> {
+  try {
+    return await request.json();
+  } catch {
+    throw validationError("Request body must be valid JSON");
+  }
+}
+
 export interface CreateLoanInput {
   principalPaise: bigint;
   annualInterestRate: number;
