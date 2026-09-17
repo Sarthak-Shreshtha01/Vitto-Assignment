@@ -74,16 +74,19 @@ Work through phases sequentially and check in after each one before moving to th
 
 ---
 
-## Phase 4 — Data Access Layer
+## Phase 4 — Data Access Layer ✅ Done
 
 **Goal:** wrap all DB reads/writes with transaction boundaries and duplicate detection, per the Architecture doc's repository layer.
 
-- [ ] `lib/db.ts` — Prisma client singleton (dev hot-reload safe)
-- [ ] `lib/repository/loanRepository.ts`:
+- [x] `lib/db.ts` — Prisma client singleton (dev hot-reload safe)
+- [x] `lib/repository/loanRepository.ts`:
   - `createLoanWithSchedule()` — loan + instalments in one transaction
-  - `findLoanWithScheduleAndPayments()`
+  - `findLoanWithScheduleAndPayments()` — throws `NOT_FOUND` for an unknown id
+  - `listLoans()` — backs the `GET /api/loans` extension for the UI picker
   - `findExistingPayment(loanId, amount, date)` — duplicate lookup
-  - `savePaymentWithAllocations()` — payment + instalment updates + allocation rows in one transaction, catching the unique-constraint violation as "replay" rather than a raw error
+  - `savePaymentWithAllocations()` — payment + instalment updates + allocation rows in one transaction; catches the unique-constraint violation (P2002) as a replay rather than a raw error, as a safety net for concurrent/racing duplicate requests
+- [x] Verified against the real Supabase DB with a throwaway integration check (not committed): create → read back → no duplicate found → save payment → duplicate detected on replay → cleaned up
+- [x] Bumped Vitest's `testTimeout` to 20s — the hosted pooler's round-trip is well over the 5s default, which caused false timeouts during that check
 
 **Traces to:** PRD §14 (transactions, DB-level duplicate prevention), Architecture §4.4
 

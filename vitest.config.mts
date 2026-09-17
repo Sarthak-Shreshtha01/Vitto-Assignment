@@ -6,5 +6,8 @@ export default defineConfig({
   },
   test: {
     environment: "node",
+    // Integration tests round-trip to a hosted Supabase pooler; the 5s
+    // default is too tight for that over a real network.
+    testTimeout: 20000,
   },
 });
