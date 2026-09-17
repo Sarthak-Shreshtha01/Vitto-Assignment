@@ -109,14 +109,18 @@ Work through phases sequentially and check in after each one before moving to th
 
 ---
 
-## Phase 6 — Integration Tests
+## Phase 6 — Integration Tests ✅ Done
 
 **Goal:** exercise the route handlers against a real test database — not mocks.
 
-- [ ] `POST /api/loans` success path
-- [ ] One failure path (e.g. `GET /api/loans/:id` unknown id → 404)
-- [ ] Unauthenticated request → 401 without a valid token
-- [ ] Test data isolation (each test creates/cleans its own rows, or DB reset between runs)
+- [x] `POST /api/loans` success path — `tests/integration/createLoan.test.ts`
+- [x] One failure path (`GET /api/loans/:id` unknown id → 404) — `tests/integration/getLoan.test.ts`
+- [x] Unauthenticated request → 401 without a valid token — `tests/integration/auth.test.ts`
+- [x] Test data isolation — each test cleans up what it creates (`afterAll` cascade-deletes); verified DB left at 0 rows after each run
+
+Route handlers are invoked directly (real `Request`/`NextResponse` objects, real Prisma against the real Supabase DB) rather than through a running HTTP server — still exercises the actual handler code end-to-end. Since Firebase isn't set up yet (deferred — see TODO), the success-path and failure-path tests mock only `requireAuth` itself; the auth test is the one that exercises the real, unmocked guard with no token at all. Full suite: 17 tests (14 unit + 3 integration), all passing via `npm test`.
+
+**Traces to:** PRD FR-6, SRS §3.6, §10
 
 **Traces to:** PRD FR-6, SRS §3.6, §10; total suite should land at ~8–12 tests across Phases 3 + 6
 
