@@ -259,10 +259,10 @@ Fix: build with webpack instead of Turbopack (`"build": "next build --webpack"`)
 
 **Goal:** the one-page README a reviewer needs to run everything cold, plus the final packaging.
 
-- [ ] Setup steps (fresh clone → install → env → DB setup → dev → test → sign-in → use)
-- [ ] Database used, test command, endpoint reference
-- [ ] Money type chosen (integer paise) and why
-- [ ] Allocation order + overpayment/late/duplicate decisions (SRS §7), stated plainly
+- [x] Setup steps (fresh clone → install → env → DB setup → dev → test → sign-in → use)
+- [x] Database used, test command, endpoint reference
+- [x] Money type chosen (integer paise) and why
+- [x] Allocation order + overpayment/late/duplicate decisions (SRS §7), stated plainly
 - [ ] Verify against an actual fresh clone before submitting
 - [ ] Submission email to `sourav.shukla@vitto.money` — repo access, env values, test account, live link
 
