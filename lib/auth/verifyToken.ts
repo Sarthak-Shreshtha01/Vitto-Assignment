@@ -33,15 +33,35 @@ export interface AuthenticatedUser {
 // <token> header. Returns null (never throws) on anything missing,
 // malformed, or invalid - callers decide how to respond. Used by both
 // proxy.ts (the primary check) and requireAuth()'s fallback below.
-export async function verifyBearerToken(request: Request): Promise<AuthenticatedUser | null> {
+export async function verifyBearerToken(
+  request: Request,
+): Promise<AuthenticatedUser | null> {
   const header = request.headers.get("authorization");
-  const token = header?.startsWith("Bearer ") ? header.slice("Bearer ".length).trim() : null;
-  if (!token) return null;
+
+  const token = header?.startsWith("Bearer ")
+    ? header.slice("Bearer ".length).trim()
+    : null;
+
+  if (!token) {
+    console.error("AUTH ERROR: No Bearer token received");
+    return null;
+  }
 
   try {
     const decoded = await getAuth(getAdminApp()).verifyIdToken(token);
-    return { uid: decoded.uid, email: decoded.email ?? null };
-  } catch {
+
+    console.log("AUTH SUCCESS:", {
+      uid: decoded.uid,
+      email: decoded.email,
+      projectId: process.env.FIREBASE_ADMIN_PROJECT_ID,
+    });
+
+    return {
+      uid: decoded.uid,
+      email: decoded.email ?? null,
+    };
+  } catch (error) {
+    console.error("Firebase Admin verifyIdToken failed:", error);
     return null;
   }
 }
