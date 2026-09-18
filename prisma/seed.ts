@@ -6,6 +6,10 @@
 // Uses the app's own service/repository layer rather than raw SQL, so the
 // seeded data is guaranteed internally consistent with what the running
 // app would itself produce.
+//
+// Idempotent by design: clears every existing loan before reseeding (all
+// loan rows in this DB are assumed to be this script's own demo data, never
+// real user data), so running it again never creates duplicates.
 import { generateSchedule } from "../lib/services/scheduleService";
 import { allocate } from "../lib/services/allocationService";
 import {
@@ -78,6 +82,10 @@ async function seedLoan(input: SeedLoanInput): Promise<void> {
 }
 
 async function main() {
+  console.log("Clearing existing loans...");
+  const { count } = await prisma.loan.deleteMany(); // cascades to instalments/payments/allocations
+  console.log(`Removed ${count} loan(s).`);
+
   console.log("Seeding demo loans (synthetic data only)...");
 
   // Mixed state: two instalments paid on time, the third only half-paid and
@@ -115,6 +123,52 @@ async function main() {
     tenureMonths: 24,
     disbursementDate: "2026-09-05",
     payments: [{ instalmentSequence: 1, fraction: 1.5, date: "2026-09-18" }],
+  });
+
+  // Severely overdue: disbursed long enough ago, with zero payments, that
+  // several instalments have stacked up overdue at once.
+  await seedLoan({
+    label: "severely overdue (several unpaid instalments)",
+    principal: 300000,
+    annualInterestRate: 15,
+    tenureMonths: 12,
+    disbursementDate: "2026-01-05",
+    payments: [],
+  });
+
+  // Edge of the valid range: minimum principal, minimum tenure.
+  await seedLoan({
+    label: "minimum principal/tenure",
+    principal: 50000,
+    annualInterestRate: 12,
+    tenureMonths: 3,
+    disbursementDate: "2026-09-10",
+    payments: [],
+  });
+
+  // Edge of the valid range: maximum principal, maximum tenure.
+  await seedLoan({
+    label: "maximum principal/tenure",
+    principal: 1000000,
+    annualInterestRate: 11,
+    tenureMonths: 36,
+    disbursementDate: "2026-09-10",
+    payments: [],
+  });
+
+  // Fully paid off - exercises the "Fully paid" position state, which none
+  // of the other demo loans reach.
+  await seedLoan({
+    label: "fully paid off",
+    principal: 60000,
+    annualInterestRate: 10,
+    tenureMonths: 3,
+    disbursementDate: "2026-05-01",
+    payments: [
+      { instalmentSequence: 1, fraction: 1, date: "2026-06-01" },
+      { instalmentSequence: 2, fraction: 1, date: "2026-07-01" },
+      { instalmentSequence: 3, fraction: 1, date: "2026-08-01" },
+    ],
   });
 
   console.log("Done.");

@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
-import { authedFetch } from "@/lib/apiClient";
+import { useState, type SubmitEvent } from "react";
+import { loanApi } from "@/lib/api/loanApi";
 import type { PaymentResponse } from "@/app/apiTypes";
 import { Spinner } from "@/app/components/Spinner";
 
@@ -19,15 +19,12 @@ export function PaymentForm({ loanId, onRecorded }: PaymentFormProps) {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  async function handleSubmit(event: FormEvent) {
+  async function handleSubmit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
     setSubmitting(true);
     try {
-      const response = await authedFetch<PaymentResponse>(`/api/loans/${loanId}/payments`, {
-        method: "POST",
-        body: JSON.stringify({ amount: Number(amount), date }),
-      });
+      const response = await loanApi.recordPayment(loanId, { amount: Number(amount), date });
       onRecorded(response);
       setAmount("");
       setOpen(false);

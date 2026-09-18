@@ -101,14 +101,33 @@ Wraps all DB reads/writes. Two responsibilities beyond plain CRUD:
 - **Duplicate detection** — the unique constraint on `payments(loan_id, amount_paise, payment_date)` (SRS §4.2) is enforced here; the repository catches the constraint violation and returns "this is a replay" rather than letting a raw DB error bubble up.
 
 ### 4.5 Frontend
-One page, a handful of components, and a single API client. Visual design follows `docs/stitch.md` (Vitto's brand palette/typography extracted from vitto.money, adapted for a data-dense internal tool — restrained accent color usage, neutral surfaces for the schedule/KPI data, brand pink reserved for primary actions and overdue alerts) via CSS custom properties in `app/globals.css` — no component library, per the brief.
 
-- `lib/apiClient.ts`'s `authedFetch()` — every component call goes through this, never `fetch()` or a Firebase token directly. It owns the access token's entire lifecycle: decodes the token's own `exp` claim and caches it, proactively refreshing shortly before expiry rather than waiting for a request to fail. If a request still comes back `401` despite that (clock skew, a revoked session), it force-refreshes and retries exactly once; a `401` that persists after that means the session itself is invalid, so it signs the user out and clears the cache so `AuthGate` sends them back to sign-in. A `403` is surfaced distinctly (no retry/sign-out — there's no permission model yet, but this keeps the client correct if one is added).
-- `LoanPicker` — lists loans via `GET /api/loans`, lets the user select one (SRS §3.5).
+The frontend mirrors the backend's own layering discipline (§4.1–§4.4) rather than letting components reach straight into `fetch`. Four layers, strictly one-directional (component → hook → API layer → HTTP client):
+
+```
+Component (renders, reads hook state)
+        │
+View-model hook (lib/hooks/*.ts — owns loading/error/state for one concern)
+        │
+API layer (lib/api/loanApi.ts — typed request/response shapes, one function per endpoint)
+        │
+lib/apiClient.ts's authedFetch() — the only thing that touches fetch() or a Firebase token
+```
+
+- **`lib/api/endpoints.ts`** — the single source of truth for every `/api/...` path. No component, hook, or service ever inlines a path string; if a route moves, this is the only file that changes.
+- **`lib/api/loanApi.ts`** — one function per endpoint (`list`, `get`, `create`, `recordPayment`), each typed against `app/apiTypes.ts`. This is the only module that imports `authedFetch` — components and hooks never call it directly. `create()` transparently fetches the full detail afterward (`GET` includes `position`, `POST`'s response doesn't, by design — SRS §3.1), so callers always get a complete `LoanDetail` back.
+- **`lib/hooks/useLoans.ts` / `useLoanDetail.ts`** — the view-model layer. Each owns one piece of state (the loan list; the selected loan's full detail) plus its loading/error handling, and exposes plain functions (`select`, `addLoan`, `applyPayment`) rather than leaking `loanApi` or promises to components. `page.tsx` composes these two hooks and is otherwise declarative — no `useEffect`-plus-`fetch` in a component body anywhere in the app.
+- **`lib/apiClient.ts`**'s `authedFetch()` — the only thing that touches `fetch()` or a Firebase token directly. It owns the access token's entire lifecycle: decodes the token's own `exp` claim and caches it, proactively refreshing shortly before expiry rather than waiting for a request to fail. If a request still comes back `401` despite that (clock skew, a revoked session), it force-refreshes and retries exactly once; a `401` that persists after that means the session itself is invalid, so it signs the user out and clears the cache so `AuthGate` sends them back to sign-in. A `403` is surfaced distinctly (no retry/sign-out — there's no permission model yet, but this keeps the client correct if one is added).
+
+Visual design follows `docs/stitch.md` (Vitto's brand palette/typography extracted from vitto.money, adapted for a data-dense internal tool — restrained accent color usage, neutral surfaces for the schedule/KPI data, brand pink reserved for primary actions and overdue alerts) via CSS custom properties in `app/globals.css` — no component library, per the brief.
+
+**Components** (presentational; state comes from the hooks above via `page.tsx`):
+- `LoanPicker` — renders the loan list (passed in as props, not fetched here) with a search box once there are more than a handful (filters by reference/id/principal/rate — there's no borrower name in the schema, per PRD's scope).
+- `CreateLoanForm` — a modal calling `loanApi.create()`. Not required by the brief (PRD FR-5 explicitly allows API/seed-script-only creation), but low-risk since it's a thin UI over an already-tested endpoint.
 - `ScheduleTable` — renders the schedule with per-row status pills, plus a real client-derived status filter (All/Overdue/Partially Paid/Pending/Paid, with live counts) — "overdue" is computed the same way as the backend (`today > due date && not fully paid`) purely for display, never the source of truth (that stays `position.overdueAmount`).
 - `PositionCard` — outstanding principal, next due, overdue amount, rendered as three KPI cards (visually distinct pink ring/text if overdue `> 0`).
-- `PaymentForm` — a pill button that opens a modal (amount + date), calls `POST /api/loans/:id/payments`, updates local state from the response (no reload).
-- `AuthGate` — wraps the page; redirects to sign-in if no authenticated Firebase user, shows sign-out otherwise.
+- `PaymentForm` — a pill button that opens a modal (amount + date), calls `loanApi.recordPayment()`, updates local state from the response (no reload).
+- `AuthGate` — wraps the page; redirects to sign-in if no authenticated Firebase user, shows sign-out otherwise. Sign-in errors are mapped from Firebase's `error.code` to plain language (`lib/firebase/authErrors.ts`) instead of showing the raw SDK message.
 
 ## 5. Sequence Diagrams
 
@@ -251,15 +270,24 @@ loan-repayment-service/
 │   ├── page.tsx                      # the single UI page
 │   ├── apiTypes.ts                   # frontend types mirroring the API response shapes
 │   └── components/
-│       ├── LoanPicker.tsx
+│       ├── LoanPicker.tsx            # presentational + search; loans come in as props
+│       ├── CreateLoanForm.tsx        # trigger button + modal (loanApi.create)
 │       ├── ScheduleTable.tsx
 │       ├── PositionCard.tsx
-│       ├── PaymentForm.tsx        # trigger button + modal
+│       ├── PaymentForm.tsx           # trigger button + modal (loanApi.recordPayment)
 │       ├── SignIn.tsx
 │       ├── AuthGate.tsx
-│       └── BrandMark.tsx          # shared logo mark (docs/stitch.md)
+│       ├── BrandMark.tsx             # shared logo mark (docs/stitch.md)
+│       ├── Skeleton.tsx / Spinner.tsx / LoanDetailSkeleton.tsx
 ├── lib/
-│   ├── apiClient.ts                  # authedFetch() - the frontend's one API entry point
+│   ├── api/
+│   │   ├── endpoints.ts              # every "/api/..." path, in one place
+│   │   └── loanApi.ts                # one typed function per endpoint; only caller of authedFetch
+│   ├── hooks/
+│   │   ├── useLoans.ts               # view-model: loan list
+│   │   └── useLoanDetail.ts          # view-model: selected loan's schedule + position
+│   ├── apiClient.ts                  # authedFetch() - owns the access-token lifecycle
+│   ├── loanRef.ts                    # short display id for a loan (LN-XXXXXX)
 │   ├── auth/
 │   │   └── verifyToken.ts            # Firebase Admin SDK wrapper, verifyBearerToken() + requireAuth()
 │   ├── controllers/
@@ -273,7 +301,8 @@ loan-repayment-service/
 │   ├── repository/
 │   │   └── loanRepository.ts         # all DB access, transactions
 │   ├── firebase/
-│   │   └── client.ts                 # lazy Firebase client SDK init
+│   │   ├── client.ts                 # lazy Firebase client SDK init
+│   │   └── authErrors.ts             # Firebase error code -> plain-language message
 │   ├── http.ts                       # handleRoute() - controller result -> NextResponse
 │   ├── validation.ts                 # input validation + parseJsonBody()
 │   ├── money.ts                      # rupee↔paise conversion helpers
@@ -368,6 +397,7 @@ flowchart TB
 | Proxy (`proxy.ts`) verifies auth first, `requireAuth()` re-verifies if its header is missing | Fast, centralized rejection for real traffic, without silently trusting a layer that a routing change (or a direct-invocation test) could bypass |
 | Frontend API client owns the token lifecycle end-to-end (proactive refresh from the JWT's own `exp`, one reactive retry on 401, sign-out only if that still fails) | Distinguishes "token about to/just expired" (recoverable, invisible to the user) from "session truly invalid" (needs sign-in), instead of one-size-fits-all error handling |
 | UI visual design driven by CSS custom properties matching Vitto's brand (docs/stitch.md), not a component library | Satisfies the brief's "no component library required" while still giving a coherent, on-brand look — a handful of tokens plus plain CSS classes |
+| Frontend layered the same way as the backend: components → view-model hooks → `loanApi` → `authedFetch` → `fetch`, with every path centralized in `lib/api/endpoints.ts` | No component ever calls `fetch`/`authedFetch` or inlines a URL directly; a route change or a new endpoint touches one file, not every component that happens to use it |
 
 ## 13. Extensibility Notes (not built, but the design accommodates them)
 

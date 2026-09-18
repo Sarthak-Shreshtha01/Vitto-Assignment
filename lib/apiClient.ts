@@ -1,4 +1,4 @@
-import { signOut, type User } from "firebase/auth";
+import { onAuthStateChanged, signOut, type User } from "firebase/auth";
 import { getFirebaseAuth } from "@/lib/firebase/client";
 
 // Thrown for any non-2xx API response. Carries the HTTP status and the
@@ -43,21 +43,51 @@ async function fetchAndCacheToken(user: User, forceRefresh: boolean): Promise<st
   return token;
 }
 
+const AUTH_READY_TIMEOUT_MS = 5000;
+
+// `auth.currentUser` is a synchronous getter, but Firebase doesn't
+// guarantee it's already populated the instant a component's effect runs
+// right after AuthGate reacts to a sign-in - reading it directly can race
+// and see null for a brief moment even though the user really is signed
+// in (this is what was causing "Not signed in" to flash right after a
+// successful sign-in). Waiting on the auth-state stream instead resolves
+// immediately if the state is already known, and otherwise waits for the
+// definitive answer rather than guessing from a possibly-stale read.
+function waitForCurrentUser(): Promise<User> {
+  const auth = getFirebaseAuth();
+  if (auth.currentUser) {
+    return Promise.resolve(auth.currentUser);
+  }
+
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      unsubscribe();
+      reject(new ApiClientError(401, "UNAUTHENTICATED", "Not signed in"));
+    }, AUTH_READY_TIMEOUT_MS);
+
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      clearTimeout(timeout);
+      unsubscribe();
+      if (user) {
+        resolve(user);
+      } else {
+        reject(new ApiClientError(401, "UNAUTHENTICATED", "Not signed in"));
+      }
+    });
+  });
+}
+
 // Returns a token known to be valid for at least REFRESH_SKEW_MS longer,
 // refreshing proactively (before any request fails) rather than only
 // reacting to a 401. `forceRefresh` bypasses the cache entirely - used by
 // the retry path below when a request still gets a 401 despite a
 // seemingly-valid cached token (e.g. the user's session was revoked).
 async function getValidIdToken(forceRefresh = false): Promise<string> {
-  const user = getFirebaseAuth().currentUser;
-  if (!user) {
-    throw new ApiClientError(401, "UNAUTHENTICATED", "Not signed in");
-  }
-
   if (!forceRefresh && cachedToken && cachedToken.expiresAtMs - Date.now() > REFRESH_SKEW_MS) {
     return cachedToken.value;
   }
 
+  const user = await waitForCurrentUser();
   return fetchAndCacheToken(user, forceRefresh);
 }
 

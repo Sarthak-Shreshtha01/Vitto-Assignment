@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useState, type SubmitEvent } from "react";
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword } from "firebase/auth";
 import { getFirebaseAuth } from "@/lib/firebase/client";
+import { getAuthErrorMessage } from "@/lib/firebase/authErrors";
 import { BrandMark } from "@/app/components/BrandMark";
 import { Spinner } from "@/app/components/Spinner";
 
@@ -13,7 +14,7 @@ export function SignIn() {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  async function handleSubmit(event: FormEvent) {
+  async function handleSubmit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
     setSubmitting(true);
@@ -25,7 +26,7 @@ export function SignIn() {
         await createUserWithEmailAndPassword(auth, email, password);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Sign-in failed");
+      setError(getAuthErrorMessage(err));
     } finally {
       setSubmitting(false);
     }

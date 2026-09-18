@@ -1,62 +1,53 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useEffect } from "react";
 import { AuthGate } from "@/app/components/AuthGate";
 import { LoanPicker } from "@/app/components/LoanPicker";
 import { ScheduleTable } from "@/app/components/ScheduleTable";
 import { PositionCard } from "@/app/components/PositionCard";
 import { PaymentForm } from "@/app/components/PaymentForm";
+import { CreateLoanForm } from "@/app/components/CreateLoanForm";
 import { LoanDetailSkeleton } from "@/app/components/LoanDetailSkeleton";
-import { authedFetch } from "@/lib/apiClient";
-import type { LoanDetail, PaymentResponse } from "@/app/apiTypes";
+import { useLoans } from "@/lib/hooks/useLoans";
+import { useLoanDetail } from "@/lib/hooks/useLoanDetail";
+import type { LoanDetail } from "@/app/apiTypes";
 
 export default function Home() {
-  const [loanId, setLoanId] = useState<string | null>(null);
-  const [loan, setLoan] = useState<LoanDetail | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { loans, error: loansError, addLoan } = useLoans();
+  const { loanId, loan, loading, error, select, setDetail, applyPayment } = useLoanDetail();
 
-  const handleSelectLoan = useCallback((id: string) => {
-    setLoanId(id);
-    setLoading(true);
-    setError(null);
-    authedFetch<LoanDetail>(`/api/loans/${id}`)
-      .then(setLoan)
-      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load loan"))
-      .finally(() => setLoading(false));
-  }, []);
+  // Auto-select the first loan once the list arrives, so there's never an
+  // empty state to click through on a normal visit.
+  useEffect(() => {
+    if (loans && loans.length > 0 && !loanId) {
+      select(loans[0].id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loans]);
 
-  // Applies the payment response's own deltas locally, so the schedule and
-  // position update immediately without a manual refresh (FR-5/SRS §3.5).
-  function handlePaymentRecorded(response: PaymentResponse) {
-    setLoan((current) => {
-      if (!current) return current;
-      const appliedBySequence = new Map(
-        response.appliedTo.map((a) => [a.sequenceNumber, a.amountApplied]),
-      );
-
-      return {
-        ...current,
-        position: response.position,
-        schedule: current.schedule.map((row) => {
-          const applied = appliedBySequence.get(row.sequenceNumber);
-          if (!applied) return row;
-          const amountPaid = row.amountPaid + applied;
-          return {
-            ...row,
-            amountPaid,
-            status: amountPaid >= row.totalDue ? "PAID" : amountPaid > 0 ? "PARTIALLY_PAID" : "PENDING",
-          };
-        }),
-      };
+  function handleLoanCreated(created: LoanDetail) {
+    addLoan({
+      id: created.id,
+      principal: created.principal,
+      annualInterestRate: created.annualInterestRate,
+      tenureMonths: created.tenureMonths,
+      disbursementDate: created.disbursementDate,
+      emiAmount: created.emiAmount,
     });
+    setDetail(created);
   }
 
   return (
     <AuthGate>
       {() => (
         <main className="main-content">
-          <LoanPicker selectedLoanId={loanId} onSelect={handleSelectLoan} />
+          <LoanPicker
+            loans={loans}
+            error={loansError}
+            selectedLoanId={loanId}
+            onSelect={select}
+            actions={<CreateLoanForm onCreated={handleLoanCreated} />}
+          />
           {error && <p className="error-text">{error}</p>}
           {loading && <LoanDetailSkeleton />}
           {!loading && loan && (
@@ -64,7 +55,7 @@ export default function Home() {
               <PositionCard position={loan.position} />
               <ScheduleTable
                 schedule={loan.schedule}
-                actions={<PaymentForm loanId={loan.id} onRecorded={handlePaymentRecorded} />}
+                actions={<PaymentForm loanId={loan.id} onRecorded={applyPayment} />}
               />
             </>
           )}

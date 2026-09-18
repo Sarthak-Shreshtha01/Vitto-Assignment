@@ -187,6 +187,28 @@ Requested explicitly, on top of the phase plan: a real middleware layer, a contr
 - **UI rebuilt against `docs/stitch.md`** (Vitto's brand system, extracted from vitto.money) — see Phase 7's checklist for specifics.
 - Verified: full test suite still green (18/18) after the refactor; rebuilt, relinted; live end-to-end check against the running dev server with a real Firebase token covering GET list, GET by id, POST create, POST payment (including duplicate detection), and malformed-JSON handling — all through the new proxy → controller path, not the old direct-in-route path; cleaned DB back to the 3 seed loans afterward.
 
+### Follow-up round: UI polish, frontend layering, create-loan, seed expansion
+
+- Removed Google sign-in (email/password only); removed client-side password/email format validation per explicit request - Firebase's own server-side response still surfaces real errors.
+- Added skeleton loaders (`Skeleton`, `LoanDetailSkeleton`) and a `Spinner` for buttons/the initial auth check, replacing plain "Loading…" text everywhere.
+- Firebase sign-in errors now map from `error.code` to plain language (`lib/firebase/authErrors.ts`) instead of showing the raw SDK message (e.g. "Incorrect email or password" instead of "Firebase: Error (auth/invalid-credential).").
+- Added `CreateLoanForm` (a modal over the already-tested `POST /api/loans`) - not required by the brief (FR-5 explicitly allows API/seed-only creation) but low-risk and requested.
+- **Frontend re-layered properly**, on top of a direct correction: no more `useEffect` + inline `authedFetch("/api/...")` in components.
+  - `lib/api/endpoints.ts` - every path in one place.
+  - `lib/api/loanApi.ts` - one typed function per endpoint; the only caller of `authedFetch`.
+  - `lib/hooks/useLoans.ts` / `useLoanDetail.ts` - view-model hooks owning loading/error/state; `page.tsx` is now purely declarative.
+  - `LoanPicker` became presentational (loans passed in as props) with a search box (filters by reference/id/principal/rate) once there are more than a handful.
+- Seed script made **properly idempotent** (`prisma.loan.deleteMany()` before reseeding - was previously a documented gap) and expanded from 3 to 7 loans: added a severely-overdue loan (several stacked unpaid instalments), min- and max-principal/tenure edge cases, and a fully-paid-off loan (exercises the "Fully paid" position state nothing else reached). Verified idempotency by running it twice in a row (stayed at 7, no duplicates) and spot-checked every loan's derived position directly.
+- Verified live again after all of this: full suite green, build/lint clean, dev server SSR shell renders, and the exact create-loan flow (`POST` then `GET` for the full detail) exercised over real HTTP with a real token.
+
+### Bug fix: "Not signed in" flashing right after a real, successful sign-in
+
+User-reported: signed in successfully (Firebase's own `identitytoolkit` call returned 200, no console errors), but the dashboard showed a "Not signed in" error instead of the loan list - not a session-expiry bounce, since no `/api/loans` request was even visible in the network tab.
+
+Root cause: `apiClient.ts`'s `getValidIdToken()` read `auth.currentUser` via its synchronous getter immediately when `useLoans()`'s effect fired right after `AuthGate` switched to the authenticated view. Firebase doesn't guarantee that getter reflects a just-completed sign-in the instant a dependent effect runs - a known class of race in Firebase+React apps. When it lost the race, the code took the `!user` branch and threw "Not signed in" before ever calling `fetch()`, matching every symptom exactly.
+
+Fix: replaced the direct `.currentUser` read with `waitForCurrentUser()`, which resolves immediately if `currentUser` is already set (the normal case, zero added latency) and otherwise waits on the `onAuthStateChanged` stream for the definitive answer (bounded by a 5s timeout, so a genuinely signed-out user still fails fast). Verified: full suite still green, build/lint clean.
+
 ---
 
 ## Phase 9 — Deployment
