@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 
@@ -11,8 +11,18 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Loan Repayment Service",
-  description: "Loan schedule, position, and payment tracking",
+  title: {
+    default: "Loan Repayment Service",
+    template: "%s · Loan Repayment Service",
+  },
+  description: "Internal ops tool for tracking loan repayment schedules, positions, and payments.",
+  applicationName: "Loan Repayment Service",
+  // Internal tool, not a public product - keep it out of search results.
+  robots: { index: false, follow: false },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#E3195E", // --vitto-pink, docs/stitch.md §7
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

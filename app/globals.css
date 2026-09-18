@@ -344,6 +344,61 @@ table {
   color: var(--text-secondary);
 }
 
+.loan-dropdown {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.loan-dropdown-trigger {
+  width: 100%;
+  height: 2.75rem;
+  padding: 0 0.75rem;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-field);
+  font-size: 0.8125rem;
+  text-align: left;
+}
+
+.loan-dropdown-trigger:hover {
+  border-color: var(--vitto-pink);
+}
+
+.loan-dropdown-trigger .loan-list-meta {
+  margin-left: auto;
+}
+
+.loan-dropdown-chevron {
+  color: var(--text-tertiary);
+  transition: transform 0.15s ease;
+  flex-shrink: 0;
+}
+
+.loan-dropdown-chevron.open {
+  transform: rotate(180deg);
+}
+
+.loan-dropdown-panel {
+  position: absolute;
+  top: calc(100% + 0.4rem);
+  left: 0;
+  right: 0;
+  z-index: 20;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  box-shadow: 0 12px 32px rgba(14, 14, 23, 0.14);
+  padding: 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
 .loan-search {
   height: 2.5rem;
   padding: 0 0.75rem;

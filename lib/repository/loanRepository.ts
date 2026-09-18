@@ -154,30 +154,51 @@ export async function savePaymentWithAllocations(input: {
   appliedTo: { instalmentId: string; amountAppliedPaise: bigint }[];
 }): Promise<SavePaymentResult> {
   try {
-    return await prisma.$transaction(async (tx) => {
-      const payment = await tx.payment.create({
-        data: { loanId: input.loanId, amountPaise: input.amountPaise, paymentDate: input.date },
-      });
-
-      const allocations: PaymentAllocation[] = [];
-      for (const applied of input.appliedTo) {
-        await tx.instalment.update({
-          where: { id: applied.instalmentId },
-          data: { amountPaidPaise: { increment: applied.amountAppliedPaise } },
+    return await prisma.$transaction(
+      async (tx) => {
+        const payment = await tx.payment.create({
+          data: { loanId: input.loanId, amountPaise: input.amountPaise, paymentDate: input.date },
         });
-        allocations.push(
-          await tx.paymentAllocation.create({
-            data: {
+
+        let allocations: PaymentAllocation[] = [];
+
+        if (input.appliedTo.length > 0) {
+          // A single Postgres transaction runs on one connection, so
+          // statements against it are processed one at a time regardless
+          // of how the JS code issuing them is structured (Promise.all
+          // doesn't buy real concurrency here) - the only way to keep a
+          // payment that cascades across many instalments fast is to cut
+          // the number of round-trips to a constant, not one pair per
+          // instalment. Prisma's query builder can't bulk-update rows with
+          // a different increment each, so this does it in raw SQL.
+          const values = Prisma.join(
+            input.appliedTo.map(
+              (applied) => Prisma.sql`(${applied.instalmentId}::text, ${applied.amountAppliedPaise}::bigint)`,
+            ),
+          );
+          await tx.$executeRaw`
+            UPDATE instalments AS i
+            SET amount_paid_paise = i.amount_paid_paise + v.amount
+            FROM (VALUES ${values}) AS v(id, amount)
+            WHERE i.id = v.id
+          `;
+
+          allocations = await tx.paymentAllocation.createManyAndReturn({
+            data: input.appliedTo.map((applied) => ({
               paymentId: payment.id,
               instalmentId: applied.instalmentId,
               amountAppliedPaise: applied.amountAppliedPaise,
-            },
-          }),
-        );
-      }
+            })),
+          });
+        }
 
-      return { duplicate: false as const, payment, allocations };
-    });
+        return { duplicate: false as const, payment, allocations };
+      },
+      // Defense in depth on top of the parallelization above - the hosted
+      // pooler's round-trip latency is well over Prisma's 5s default (see
+      // vitest.config.mts for the same underlying reason).
+      { timeout: 20000 },
+    );
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
       const existing = await findExistingPayment(input.loanId, input.amountPaise, input.date);

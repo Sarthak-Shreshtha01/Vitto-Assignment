@@ -209,6 +209,21 @@ Root cause: `apiClient.ts`'s `getValidIdToken()` read `auth.currentUser` via its
 
 Fix: replaced the direct `.currentUser` read with `waitForCurrentUser()`, which resolves immediately if `currentUser` is already set (the normal case, zero added latency) and otherwise waits on the `onAuthStateChanged` stream for the definitive answer (bounded by a 5s timeout, so a genuinely signed-out user still fails fast). Verified: full suite still green, build/lint clean.
 
+### Bug fix: large payments failing with a 500 (real production bug, found via user report)
+
+User-reported: recording a ₹20,000 payment on a loan worked, but ₹1,20,000 on the same loan returned `500 INTERNAL_ERROR`. Reproduced directly against the user's actual loan (still in the DB) rather than a synthetic one.
+
+Root cause, found in the server console (which logs the real error before sanitizing the HTTP response): `PrismaClientKnownRequestError: Transaction already closed` / `Transaction not found`. `savePaymentWithAllocations()` looped over every instalment the payment touched, doing an `UPDATE` then an `INSERT` per instalment **inside one interactive transaction**. A small payment touches 1-2 instalments and finishes quickly; a larger one that cascades across many touches N of them, and each round-trip to the hosted Supabase pooler has real latency - past a certain N, cumulative time blew through Prisma's 5s default transaction timeout and Postgres closed the transaction mid-write.
+
+First attempt (parallelizing the per-instalment work with `Promise.all`, plus raising the timeout to 20s) was **not actually a fix** - a Postgres transaction runs on one connection, so statements against it are processed one at a time no matter how the JS is structured; a regression test cascading a payment across 24 instalments still timed out. The real fix: cut the number of round-trips to a **constant**, not one pair per instalment -
+
+- One raw SQL `UPDATE ... FROM (VALUES ...)` bulk-updates every touched instalment's `amount_paid_paise` in a single statement (Prisma's query builder has no "different increment per row" bulk update, hence raw SQL here specifically).
+- One `createManyAndReturn` bulk-inserts all the allocation rows.
+
+Payment creation + these two now total 3 round-trips regardless of how many instalments are touched, instead of `1 + 2N`. The same 24-instalment cascade that used to time out at 20s+ now completes in ~8s.
+
+Added `tests/integration/paymentCascade.test.ts` as a permanent regression test (a payment cascading across all 24 instalments of a max-principal, max-ish-tenure loan) - this is what caught the `Promise.all` non-fix before it shipped. Full suite: 19 tests, all green.
+
 ---
 
 ## Phase 9 — Deployment
@@ -244,8 +259,8 @@ Fix: replaced the direct `.currentUser` read with `waitForCurrentUser()`, which 
 
 Only pull from this list once Phases 1–10 are solid (PRD §14):
 
-- [ ] `GET /health`
-- [ ] Invariant-style tests ("allocated amounts never exceed amount paid", "outstanding principal never negative")
+- [x] `GET /health` - `app/api/health/route.ts`, deliberately excluded from proxy.ts's auth so uptime monitoring can reach it unauthenticated; runs `SELECT 1` against the real DB
+- [x] Invariant-style tests - `tests/unit/invariants.test.ts`: conservation (applied + excess === payment amount, always), no instalment ever paid past its due amount, outstanding principal and overdue amount never negative, across a varied sequence of payments
 - [ ] Append-only payment ledger (or documented as a design decision, even if not built)
 - [ ] Optimistic concurrency (`version` column on loans)
 - [ ] OpenAPI/Swagger description

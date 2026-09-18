@@ -17,6 +17,12 @@ import { setTrustedAuthHeaders, verifyBearerToken } from "@/lib/auth/verifyToken
 // proxy, and anything that invokes a route handler directly (our
 // integration tests, for instance) bypasses this file entirely.
 export async function proxy(request: NextRequest) {
+  // Health checks need to be reachable without a token, same as any real
+  // uptime monitor would require.
+  if (request.nextUrl.pathname === "/api/health") {
+    return NextResponse.next();
+  }
+
   const user = await verifyBearerToken(request);
 
   if (!user) {
