@@ -224,6 +224,21 @@ Payment creation + these two now total 3 round-trips regardless of how many inst
 
 Added `tests/integration/paymentCascade.test.ts` as a permanent regression test (a payment cascading across all 24 instalments of a max-principal, max-ish-tenure loan) - this is what caught the `Promise.all` non-fix before it shipped. Full suite: 19 tests, all green.
 
+### Deployment bug: `GET /api/loans` returning 500 only on Vercel, never locally
+
+User-reported after the first live deploy: every authenticated request (real, valid token; sign-in itself worked) returned `500 INTERNAL_ERROR`. Vercel's runtime logs showed the actual cause:
+
+```
+Error: Failed to load external module firebase-admin.../auth: Error [ERR_REQUIRE_ESM]:
+require() of ES Module .../node_modules/jose/dist/webapi/index.js from
+.../node_modules/jwks-rsa/src/utils.js not supported.
+    at Context.externalImport [as y] (.next/server/chunks/[turbopack]_runtime.js:687:15)
+```
+
+Verified directly: `jose@6.2.12` (pulled in transitively via `firebase-admin` → `jwks-rsa@4.1.0`) is pure ESM (`"type": "module"`), and `jwks-rsa` `require()`s it as CommonJS. First hypothesis - Vercel running an older Node.js without `require(esm)` support - was ruled out by the user confirming Vercel was already on Node 24.x, identical to the version this was verified against locally (where it worked fine via `next start`). So the divergence wasn't the Node runtime; it was specifically Turbopack's `externalImport` runtime helper (visible in the stack trace) resolving `jose`'s `exports` map differently than Vercel's actual serverless packaging needs - a rough edge from Turbopack production builds being new in Next.js 16, not something in our own code.
+
+Fix: build with webpack instead of Turbopack (`"build": "next build --webpack"`) - webpack's Node File Trace-based serverless packaging is what Vercel has supported for years, and is what actually emits a "Collecting build traces..." step Turbopack's build didn't. `next dev` is left on Turbopack (fine - the bug was specific to the serverless production bundle). Also added `"engines": { "node": ">=22.12.0" }` to document the `require(esm)` dependency regardless, since it's a real constraint even though it wasn't the actual trigger here. Verified: webpack build succeeds, `next start` still serves real data correctly with a real token, full suite (21 tests) and lint still clean.
+
 ---
 
 ## Phase 9 — Deployment
