@@ -2,14 +2,12 @@
 
 A backend + single-page UI for MSME lending operations: generates an EMI repayment schedule for a loan, records payments against it, and reports a loan's current position (outstanding principal, next due, overdue amount) at any time. Built for the Vitto Full Stack SDE take-home assignment.
 
+📄 **Full architecture, diagrams, and design-decision rationale:** [`docs/Architecture.md`](./docs/Architecture.md)
+
 **Live demo:** https://vitto-assignment-chi.vercel.app
-**Test account:** `vitto.reviewer@example.com` / `ReviewerPass123!`
+**Test account:** `admin@gmail.com` / `admin123`
 
 The deployed instance is seeded with several demo loans in different states (on-track, overdue, overpaid, fully paid) so it's explorable immediately — no need to create a loan first.
-
-## Project docs
-
-Full architectural detail — layering, folder structure, sequence diagrams, database ERD, and the ADR summary of every key design decision — is in [`docs/Architecture.md`](./docs/Architecture.md).
 
 ## Tech stack
 
