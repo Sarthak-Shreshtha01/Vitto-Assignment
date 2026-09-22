@@ -35,6 +35,12 @@ export function useLoanDetail() {
   function applyPayment(response: PaymentResponse) {
     setLoan((current) => {
       if (!current) return current;
+      // A duplicate replays the original payment's already-applied
+      // allocation for display purposes, but nothing changed server-side -
+      // applying its deltas here would double-count on top of the first,
+      // real submission (SRS §7.4).
+      if (response.duplicate) return current;
+
       const appliedBySequence = new Map(
         response.appliedTo.map((a) => [a.sequenceNumber, a.amountApplied]),
       );
